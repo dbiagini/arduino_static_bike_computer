@@ -1,17 +1,25 @@
-#include <avr/io.h>
-#include <avr/interrupt.h>
 
 // Pin connected to the reed switch
-const int reedSwitchPin = 2;
+#define BUTTON_PIN 3
+#define REEDSWITCH_PIN 2
+
 
 // Variables to track time and rotations
 volatile unsigned long overflowCount = 0; // Count of timer overflows
 volatile unsigned long lastTimerValue = 0; // Last Timer1 value
 volatile unsigned long timeInterval = 0;  // Time interval between rotations in timer ticks
+// Global debounce variables
+volatile unsigned long lastDebounceTime = 0; // Last time the ISR was triggered
+const unsigned long debounceDelay = 10;     // Debounce delay in milliseconds
+
 
 void setup() {
+  cli(); // Disable global interrupts during setup
+
   // Set up the reed switch pin
-  pinMode(reedSwitchPin, INPUT_PULLUP);
+  pinMode(REEDSWITCH_PIN, INPUT_PULLUP);
+  //configure button pin
+  pinMode(BUTTON_PIN, INPUT);
 
   // Configure Timer1
   TCCR1A = 0; // Normal mode
@@ -22,13 +30,15 @@ void setup() {
   TIMSK1 = (1 << TOIE1);
 
   // Attach an interrupt to detect the reed switch signal
-  attachInterrupt(digitalPinToInterrupt(reedSwitchPin), measureTime, FALLING);
+  attachInterrupt(digitalPinToInterrupt(REEDSWITCH_PIN), measureTime, FALLING);
 
   // Enable global interrupts
   sei();
 
   // Serial communication for monitoring
   Serial.begin(9600);
+  Serial.println("Program started.");
+
 }
 
 void loop() {
@@ -57,24 +67,27 @@ void loop() {
   }
 }
 
-// Interrupt Service Routine (ISR) for time measurement
 void measureTime() {
-  unsigned long currentTimerValue;
-  unsigned long overflows;
+  unsigned long currentTime = millis(); // Get the current time
 
-  noInterrupts();
-  currentTimerValue = TCNT1;  // Read the current Timer1 value
-  overflows = overflowCount; // Read the overflow count
-  interrupts();
+  // Check if the interrupt is triggered within the debounce delay
+  if (currentTime - lastDebounceTime > debounceDelay) {
+    unsigned long currentTimerValue = TCNT1;  // Read the current Timer1 value
+    unsigned long overflows = overflowCount; // Read the overflow count
 
-  // Calculate the full timer value, including overflows
-  unsigned long fullTimerValue = (overflows << 16) + currentTimerValue;
+    // Calculate the full timer value, including overflows
+    unsigned long fullTimerValue = (overflows << 16) + currentTimerValue;
 
-  if (lastTimerValue > 0) { // Skip the first measurement
-    timeInterval = fullTimerValue - lastTimerValue; // Calculate time interval (ticks)
+    if (lastTimerValue > 0) { // Skip the first measurement
+      timeInterval = fullTimerValue - lastTimerValue; // Calculate time interval (ticks)
+    }
+    lastTimerValue = fullTimerValue; // Update the last timer value
+
+    // Update the last debounce time
+    lastDebounceTime = currentTime;
   }
-  lastTimerValue = fullTimerValue; // Update the last timer value
 }
+
 
 // Timer1 Overflow Interrupt Service Routine
 ISR(TIMER1_OVF_vect) {

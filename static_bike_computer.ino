@@ -16,6 +16,8 @@ volatile unsigned long countIntraPulses = 0; //counter
 volatile float rpmsIntraPulses = 0;
 volatile float rpms = 0;             // Time period in seconds
 volatile unsigned long lastTimerValue = 0; // Last Timer1 value (including overflows)
+volatile unsigned int secs = 0; // Elapsed seconds
+
 
 // Parameters
 const float wheelDiameter = 0.740; // Example: 0.7 meters (70 cm)
@@ -87,41 +89,42 @@ void loop() {
 void countPulse() {
   static unsigned long lastRotationTime = 0;
 
-  unsigned long currentTime = (overflowCount << 16) + TCNT1; // Extended Timer1 value
-  unsigned long elapsedTime = currentTime - lastRotationTime;
+  // Calculate elapsed time in milliseconds
+  unsigned long currentTimerRegMs = TCNT1 * 1000UL / OCR1A;
+  unsigned long currentTimeMs = (secs * 1000) + currentTimerRegMs;
 
-  if (elapsedTime > DEBOUNCE) { // Debounce delay 
+  unsigned long elapsedTimeMs = currentTimeMs - lastRotationTime;
+
+  if (elapsedTimeMs > DEBOUNCE) { // Debounce delay 
+
     pulseCount++;
-    lastRotationTime = currentTime;
-    countIntraPulses = elapsedTime;
+    lastRotationTime = currentTimeMs;
+    periodIntraPulses = elapsedTimeMs;
+    //secs = 0; //reset seconds count should be not needed as it should fit 136 years of count
   }
-  // //if the LED is off turn it on and vice-versa:
-  //   if (ledState == LOW) {
-  //     ledState = HIGH;
-  //   } else {
-  //     ledState = LOW;
-  //   }
 
-    // set the LED with the ledState of the variable:
-    digitalWrite(LED_PIN, ledState);
+  
 }
 
 // Timer1 Overflow Interrupt Service Routine
 ISR(TIMER1_OVF_vect) {
   overflowCount++;
-  // //if the LED is off turn it on and vice-versa:
-  //   if (ledState == LOW) {
-  //     ledState = HIGH;
-  //   } else {
-  //     ledState = LOW;
-  //   }
-  //    digitalWrite(LED_PIN, ledState);
+  //if the LED is off turn it on and vice-versa:
+    if (ledState == LOW) {
+      ledState = HIGH;
+    } else {
+      ledState = LOW;
+    }
+     digitalWrite(LED_PIN, ledState);
 }
 
 // Timer1 Compare Interrupt Service Routine for frequency calculation
 ISR(TIMER1_COMPA_vect) {
   static unsigned int lastPulseCount = 0;
-  static unsigned int secs = 0 ;
+  static unsigned int secsStuck = 0;
+
+  // count seconds 
+  secs++;
 
   // // Calculate frequency
   // frequency = pulseCount - lastPulseCount; // Pulses per second
@@ -132,17 +135,16 @@ ISR(TIMER1_COMPA_vect) {
   // }
   // rpms = frequency * 60;
 
-    if((pulseCount == lastPulseCount) && (secs < 7)) {
+    if((pulseCount == lastPulseCount) && (secsStuck < 7)) {
       //no NEW pulses in the last second
-      secs++;
-    } else if ((pulseCount == lastPulseCount) && (secs == 7)) {
+      secsStuck++;
+    } else if ((pulseCount == lastPulseCount) && (secsStuck == 7)) {
       // exceeded 7 seconds with no rotations
-      secs = 0;
+      secsStuck = 0;
       periodIntraPulses = 0;
       frequencyIntraPulses = 0; 
       rpmsIntraPulses = 0;
     } else {
-        periodIntraPulses = countIntraPulses * 0.064; // 64 us per tick converted to ms
         if (periodIntraPulses) {
         frequencyIntraPulses = 1000.0 / periodIntraPulses ; 
         } else frequencyIntraPulses = 0;
@@ -150,17 +152,6 @@ ISR(TIMER1_COMPA_vect) {
         // Calculate speed in km/h
         speedKmh = frequencyIntraPulses * wheelCircumference * 3.6;
     }
-
-  
-  // // if the LED is off turn it on and vice-versa:
-  //   if (ledState == LOW) {
-  //     ledState = HIGH;
-  //   } else {
-  //     ledState = LOW;
-  //   }
-
-  //   // set the LED with the ledState of the variable:
-  //   digitalWrite(LED_PIN, ledState);
 
   // Update the last pulse count
   lastPulseCount = pulseCount;

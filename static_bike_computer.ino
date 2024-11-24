@@ -2,11 +2,11 @@
 // Pin connected to the reed switch
 #define LED_PIN 3
 #define REEDSWITCH_PIN 2
-#define DEBOUNCE 156
+#define DEBOUNCE 10// ms 250//156
 #define WHEELSIZE 
 
 // Variables for counting and timing
-volatile unsigned int pulseCount = 0;       // Counts reed switch triggers
+volatile unsigned long pulseCount = 0;       // Counts reed switch triggers
 volatile unsigned long overflowCount = 0;  // Counts Timer1 overflows
 volatile float frequency = 0;              // Frequency in Hz
 volatile float timePeriod = 0;             // Time period in seconds
@@ -59,7 +59,7 @@ void loop() {
   cli();
   float freq = frequencyIntraPulses;
   unsigned long period = periodIntraPulses;
-  unsigned int pulse = pulseCount;
+  unsigned long pulse = pulseCount;
   float rotPerMinute = rpmsIntraPulses; 
   float speed = speedKmh;
   sei();
@@ -67,22 +67,25 @@ void loop() {
   // Update total distance in km
   totalDistanceKm = (pulse * wheelCircumference) / 1000.0;
 
-  Serial.print("Frequency (Hz): ");
-  Serial.println(freq);
-  Serial.print("Rpms: ");
-  Serial.println(rotPerMinute);
-  Serial.print("Total Distance Km: ");
-  Serial.println(totalDistanceKm);
-  if (freq > 0) {
-    Serial.print("Time Period (ms): ");
-    Serial.println(period); // Convert to milliseconds
-    Serial.print("Speed Km/h: ");
-    Serial.println(speed);
-  } else {
-    Serial.println("Time Period: - (Wheel stopped)");
-  }
+  Serial.print("Variable_1:");
+  Serial.println(speed);
 
-  delay(1000); // Update every quarter second
+  // Serial.print("Frequency (Hz): ");
+  // Serial.println(freq);
+  // Serial.print("Rpms: ");
+  // Serial.println(rotPerMinute);
+  // Serial.print("Total Distance Km: ");
+  // Serial.println(totalDistanceKm);
+  // if (freq > 0) {
+  //   Serial.print("Time Period (ms): ");
+  //   Serial.println(period); // Convert to milliseconds
+  //   Serial.print("Speed Km/h: ");
+  //   Serial.println(speed);
+  // } else {
+  //   Serial.println("Time Period: - (Wheel stopped)");
+  // }
+
+  delay(250); // Update every quarter second
 }
 
 // Interrupt Service Routine for reed switch trigger
@@ -100,28 +103,20 @@ void countPulse() {
     pulseCount++;
     lastRotationTime = currentTimeMs;
     periodIntraPulses = elapsedTimeMs;
+    frequencyIntraPulses = 1000.0 / periodIntraPulses; 
+    rpmsIntraPulses = frequencyIntraPulses * 60;
+    speedKmh = frequencyIntraPulses * wheelCircumference * 3.6;
+
     //secs = 0; //reset seconds count should be not needed as it should fit 136 years of count
   }
 
   
 }
 
-// Timer1 Overflow Interrupt Service Routine
-ISR(TIMER1_OVF_vect) {
-  overflowCount++;
-  //if the LED is off turn it on and vice-versa:
-    if (ledState == LOW) {
-      ledState = HIGH;
-    } else {
-      ledState = LOW;
-    }
-     digitalWrite(LED_PIN, ledState);
-}
-
 // Timer1 Compare Interrupt Service Routine for frequency calculation
 ISR(TIMER1_COMPA_vect) {
-  static unsigned int lastPulseCount = 0;
-  static unsigned int secsStuck = 0;
+  static unsigned long lastPulseCount = 0;
+  static unsigned int countsStuck = 0;
 
   // count seconds 
   secs++;
@@ -135,22 +130,28 @@ ISR(TIMER1_COMPA_vect) {
   // }
   // rpms = frequency * 60;
 
-    if((pulseCount == lastPulseCount) && (secsStuck < 7)) {
-      //no NEW pulses in the last second
-      secsStuck++;
-    } else if ((pulseCount == lastPulseCount) && (secsStuck == 7)) {
-      // exceeded 7 seconds with no rotations
-      secsStuck = 0;
-      periodIntraPulses = 0;
-      frequencyIntraPulses = 0; 
-      rpmsIntraPulses = 0;
+    if(pulseCount == lastPulseCount) {
+      if (countsStuck < 7) {
+        //no NEW pulses in the last second
+        countsStuck++;
+        ///simulate slow down at constant rate
+          periodIntraPulses += countsStuck * 1000;
+          if (periodIntraPulses)
+             frequencyIntraPulses = 1000.0 / periodIntraPulses; 
+             else frequencyIntraPulses = 0;
+          rpmsIntraPulses = frequencyIntraPulses * 60;
+          speedKmh = frequencyIntraPulses * wheelCircumference * 3.6;
+
+       } else{
+        // exceeded 7 seconds with no rotations
+        //countsStuck = 0;
+        periodIntraPulses = 0;
+        frequencyIntraPulses = 0; 
+        rpmsIntraPulses = 0;
+        speedKmh = 0;
+       }
     } else {
-        if (periodIntraPulses) {
-        frequencyIntraPulses = 1000.0 / periodIntraPulses ; 
-        } else frequencyIntraPulses = 0;
-        rpmsIntraPulses = frequencyIntraPulses * 60;
-        // Calculate speed in km/h
-        speedKmh = frequencyIntraPulses * wheelCircumference * 3.6;
+      countsStuck = 0; //unstuck
     }
 
   // Update the last pulse count
